@@ -16,17 +16,6 @@ const GAME_STATUS: Record<number, string> = {
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
-type RawGame = readonly [
-  bigint,
-  string,
-  readonly [string, string],
-  number,
-  number,
-  number,
-  string,
-  boolean
-];
-
 type GameInfo = {
   id: bigint;
   creator: string;
@@ -39,6 +28,14 @@ type GameInfo = {
 };
 
 type PlayerStateResponse = readonly [boolean, `0x${string}`, `0x${string}`, `0x${string}`, boolean, number];
+type PlayerStateObject = {
+  registered: boolean;
+  coins: `0x${string}`;
+  score: `0x${string}`;
+  lastSubmittedMove: `0x${string}`;
+  hasSubmitted: boolean;
+  lastRoundSubmitted: number | bigint;
+};
 
 function shortenAddress(address?: string) {
   if (!address || address === ZERO_ADDRESS) {
@@ -140,14 +137,34 @@ export function MystBetApp() {
     if (!playerStateRaw) {
       return null;
     }
-    const tuple = playerStateRaw as PlayerStateResponse;
+
+    const value = playerStateRaw as PlayerStateResponse | PlayerStateObject;
+    const registered = (value as PlayerStateObject).registered ?? (value as PlayerStateResponse)[0];
+    const coins = (value as PlayerStateObject).coins ?? (value as PlayerStateResponse)[1];
+    const score = (value as PlayerStateObject).score ?? (value as PlayerStateResponse)[2];
+    const lastSubmittedMove =
+      (value as PlayerStateObject).lastSubmittedMove ?? (value as PlayerStateResponse)[3];
+    const hasSubmitted = (value as PlayerStateObject).hasSubmitted ?? (value as PlayerStateResponse)[4];
+    const lastRoundSubmittedRaw =
+      (value as PlayerStateObject).lastRoundSubmitted ?? (value as PlayerStateResponse)[5] ?? 0;
+
+    if (
+      registered === undefined ||
+      coins === undefined ||
+      score === undefined ||
+      lastSubmittedMove === undefined ||
+      hasSubmitted === undefined
+    ) {
+      return null;
+    }
+
     return {
-      registered: tuple[0],
-      coins: tuple[1],
-      score: tuple[2],
-      lastSubmittedMove: tuple[3],
-      hasSubmitted: tuple[4],
-      lastRoundSubmitted: Number(tuple[5]),
+      registered,
+      coins,
+      score,
+      lastSubmittedMove,
+      hasSubmitted,
+      lastRoundSubmitted: Number(lastRoundSubmittedRaw),
     };
   }, [playerStateRaw]);
 
