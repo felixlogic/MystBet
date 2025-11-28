@@ -1,110 +1,91 @@
-# FHEVM Hardhat Template
+# MystBet
 
-A Hardhat-based template for developing Fully Homomorphic Encryption (FHE) enabled Solidity smart contracts using the
-FHEVM protocol by Zama.
+MystBet is a two-player, fully homomorphic encryption (FHE) powered wagering game on Ethereum. Players create or join a match, submit encrypted coin bids, and let the contract decide each round without ever revealing their move sizes. Every bid, coin balance, and score stays encrypted on-chain while still being verifiable and deterministic.
 
-## Quick Start
+## Why MystBet
+- Private competitive play: encrypted wagers keep player strategies secret while the contract enforces the rules.
+- Fair by default: all logic resolves on-chain with auditable events for game creation, joins, starts, moves, and results.
+- Simple game loop: two players, ten coins each, highest encrypted bid wins the round until both are out of coins.
+- Built for FHE experimentation: showcases how Zama's FHEVM stack can power transparent yet privacy-preserving dapps.
 
-For detailed instructions see:
-[FHEVM Hardhat Quick Start Tutorial](https://docs.zama.ai/protocol/solidity-guides/getting-started/quick-start-tutorial)
+## Problems MystBet Tackles
+- **Leaking strategies:** Bids stay encrypted end-to-end, preventing copycats and frontrunning.
+- **Off-chain trust assumptions:** Round resolution happens entirely in the contract; no external referee is needed.
+- **Manual accounting mistakes:** Enforced coin limits stop overspending and guarantee the game ends cleanly.
+- **Opaque scoring:** Players can decrypt their own encrypted balances and scores through the relayer flow to verify outcomes.
 
-### Prerequisites
+## Core Gameplay
+- Create a game: anyone can open a lobby; the creator is auto-registered as player one.
+- Join a game: any address can fill the open slot while status is `WaitingForPlayers`.
+- Start the match: once two players are registered, either player can begin the game.
+- Submit encrypted coins: each player starts with `10` coins; submit an encrypted integer per round (cannot exceed remaining balance).
+- Resolve rounds: the higher encrypted bid wins the round and gains one encrypted point; balances decrease by the submitted amounts.
+- Finish: when both players have spent every coin, the contract marks the winner (or tie) and emits a `GameFinished` event.
 
-- **Node.js**: Version 20 or higher
-- **npm or yarn/pnpm**: Package manager
+## Tech Stack
+- **Smart contracts:** Solidity `0.8.27`, Hardhat, `@fhevm/solidity` for encrypted types and operations, `hardhat-deploy`, TypeChain, and coverage/gas tooling.
+- **Frontend:** React + Vite + TypeScript, RainbowKit + Wagmi (viem reads, ethers writes), Zama relayer SDK for encryption/decryption, CSS-based styling (no Tailwind).
+- **Testing:** Hardhat tests exercise encrypted flows (coin spending, scoring, and game finalization) using the FHEVM plugin.
+- **Network:** Sepolia configuration via Infura; local Hardhat network for development.
 
-### Installation
+## Repository Layout
+- `contracts/` — `MystBetGame.sol` encrypted two-player game contract.
+- `deploy/` — Hardhat deploy script for MystBetGame.
+- `tasks/` — Hardhat tasks for inspecting addresses, creating/joining/starting games, submitting moves, and decrypting player state.
+- `test/` — Contract tests covering game setup, encrypted rounds, limits, and completion.
+- `frontend/` — React application for playing MystBet with wallet connectivity and encrypted move flows.
+- `docs/` — Zama FHEVM references for contracts and relayer usage.
 
-1. **Install dependencies**
+## Getting Started (Contracts)
+Prerequisites: Node.js ≥ 20 and npm.
 
-   ```bash
-   npm install
-   ```
+1) Install dependencies  
+`npm install`
 
-2. **Set up environment variables**
+2) Set environment variables in a local `.env` (private key only; no mnemonic)  
+- `PRIVATE_KEY=<your_sepolia_private_key>`  
+- `INFURA_API_KEY=<your_infura_key>`  
+- `ETHERSCAN_API_KEY=<optional_for_verification>`  
 
-   ```bash
-   npx hardhat vars set MNEMONIC
+3) Compile and test  
+`npm run compile`  
+`npm test`
 
-   # Set your Infura API key for network access
-   npx hardhat vars set INFURA_API_KEY
+4) Run a local node and deploy for development  
+`npm run chain` (starts Hardhat node)  
+`npm run deploy:localhost` (deploys MystBetGame locally)
 
-   # Optional: Set Etherscan API key for contract verification
-   npx hardhat vars set ETHERSCAN_API_KEY
-   ```
+5) Deploy to Sepolia (uses `PRIVATE_KEY` and `INFURA_API_KEY`)  
+`npm run deploy:sepolia`  
+`npm run verify:sepolia <DEPLOYED_ADDRESS>` (optional, with `ETHERSCAN_API_KEY`)
 
-3. **Compile and test**
+Deployment artifacts from `hardhat-deploy` will be written to `deployments/<network>/MystBetGame.json`; use this ABI/address when updating the frontend config.
 
-   ```bash
-   npm run compile
-   npm run test
-   ```
+## Hardhat Tasks
+- `npx hardhat task:game-address --network <network>` — print the deployed MystBetGame address.
+- `npx hardhat task:create-game --network <network>` — create a new game as the caller.
+- `npx hardhat task:join-game --game <id> --network <network>` — join a waiting game as the second player.
+- `npx hardhat task:start-game --game <id> --network <network>` — start a ready game.
+- `npx hardhat task:submit-move --game <id> --value <coins> --network <network>` — submit an encrypted bid.
+- `npx hardhat task:decrypt-state --game <id> --player <address> --network <network>` — decrypt coins and score for a player (requires relayer initialization).
 
-4. **Deploy to local network**
+## Frontend App
+- Install dependencies: `cd frontend && npm install`.
+- Update contract bindings: copy `address` and `abi` from `deployments/sepolia/MystBetGame.json` into `frontend/src/config/contracts.ts` (the frontend does not use environment variables or local JSON imports).
+- Run locally: `npm run dev` inside `frontend` and connect with a Sepolia-enabled wallet.
+- Flow: connect wallet → create or join a game → start when two players are present → submit encrypted moves each round → decrypt your own coins/score with “Decrypt Balance.”
+- Connectivity: Wagmi/RainbowKit handle wallet connections on Sepolia; reads go through viem, writes through ethers; the Zama relayer SDK handles encryption and user-side decryption of FHE ciphertexts.
 
-   ```bash
-   # Start a local FHEVM-ready node
-   npx hardhat node
-   # Deploy to local network
-   npx hardhat deploy --network localhost
-   ```
+## Advantages
+- Privacy-first gameplay without sacrificing on-chain verifiability.
+- Deterministic enforcement of coin balances and scoring, removing trust in off-chain arbiters.
+- Clear audit trail through events (`GameCreated`, `PlayerJoined`, `GameStarted`, `MoveSubmitted`, `RoundResolved`, `GameFinished`).
+- Separation of concerns: secure contract logic, typed tasks, and a focused frontend that never touches local storage or localhost networks.
 
-5. **Deploy to Sepolia Testnet**
-
-   ```bash
-   # Deploy to Sepolia
-   npx hardhat deploy --network sepolia
-   # Verify contract on Etherscan
-   npx hardhat verify --network sepolia <CONTRACT_ADDRESS>
-   ```
-
-6. **Test on Sepolia Testnet**
-
-   ```bash
-   # Once deployed, you can run a simple test on Sepolia.
-   npx hardhat test --network sepolia
-   ```
-
-## 📁 Project Structure
-
-```
-fhevm-hardhat-template/
-├── contracts/           # Smart contract source files
-│   └── FHECounter.sol   # Example FHE counter contract
-├── deploy/              # Deployment scripts
-├── tasks/               # Hardhat custom tasks
-├── test/                # Test files
-├── hardhat.config.ts    # Hardhat configuration
-└── package.json         # Dependencies and scripts
-```
-
-## 📜 Available Scripts
-
-| Script             | Description              |
-| ------------------ | ------------------------ |
-| `npm run compile`  | Compile all contracts    |
-| `npm run test`     | Run all tests            |
-| `npm run coverage` | Generate coverage report |
-| `npm run lint`     | Run linting checks       |
-| `npm run clean`    | Clean build artifacts    |
-
-## 📚 Documentation
-
-- [FHEVM Documentation](https://docs.zama.ai/fhevm)
-- [FHEVM Hardhat Setup Guide](https://docs.zama.ai/protocol/solidity-guides/getting-started/setup)
-- [FHEVM Testing Guide](https://docs.zama.ai/protocol/solidity-guides/development-guide/hardhat/write_test)
-- [FHEVM Hardhat Plugin](https://docs.zama.ai/protocol/solidity-guides/development-guide/hardhat)
-
-## 📄 License
-
-This project is licensed under the BSD-3-Clause-Clear License. See the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- **GitHub Issues**: [Report bugs or request features](https://github.com/zama-ai/fhevm/issues)
-- **Documentation**: [FHEVM Docs](https://docs.zama.ai)
-- **Community**: [Zama Discord](https://discord.gg/zama)
-
----
-
-**Built with ❤️ by the Zama team**
+## Future Plans
+- Richer UI cues (round history, decrypted summaries, and winner banners per round).
+- Leaderboards or shared lobbies sourced from on-chain game listings.
+- Multi-game support per wallet with better filtering/search across `listGames`.
+- Additional relayer tooling to cache connections and improve decryption UX.
+- Extended test coverage for edge cases (simultaneous submissions, replay resistance, and pause/resume mechanics).
+- Optional support for more chains once FHEVM gateways are available beyond Sepolia.
