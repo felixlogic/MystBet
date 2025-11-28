@@ -113,9 +113,9 @@ contract MystBetGame is ZamaEthereumConfig {
 
         euint32 coinsToSpend = FHE.fromExternal(encryptedCoins, inputProof);
         ebool canSpend = FHE.le(coinsToSpend, state.coins);
-        require(FHE.decrypt(canSpend), "Insufficient coins");
+        euint32 spendAmount = FHE.select(canSpend, coinsToSpend, state.coins);
 
-        state.lastSubmittedMove = coinsToSpend;
+        state.lastSubmittedMove = spendAmount;
         state.hasSubmitted = true;
         state.lastRoundSubmitted = game.currentRound;
 
@@ -255,40 +255,71 @@ contract MystBetGame is ZamaEthereumConfig {
         FHE.allowThis(playerB.lastSubmittedMove);
         FHE.allow(playerB.lastSubmittedMove, playerBAddress);
 
-        bool aWon = FHE.decrypt(playerAWins);
-        bool bWon = FHE.decrypt(playerBWins);
-        address roundWinner = address(0);
-        if (aWon) {
-            roundWinner = playerAAddress;
-        } else if (bWon) {
-            roundWinner = playerBAddress;
-        }
-
-        emit RoundResolved(gameId, roundToResolve, roundWinner);
-
-        bool playerAHasCoins = FHE.decrypt(FHE.gt(playerA.coins, FHE.asEuint32(0)));
-        bool playerBHasCoins = FHE.decrypt(FHE.gt(playerB.coins, FHE.asEuint32(0)));
+        emit RoundResolved(gameId, roundToResolve, address(0));
 
         game.currentRound = roundToResolve + 1;
-        if (!playerAHasCoins && !playerBHasCoins) {
-            ebool firstLeadsEncrypted = FHE.gt(playerA.score, playerB.score);
-            ebool secondLeadsEncrypted = FHE.gt(playerB.score, playerA.score);
-            bool firstLeads = FHE.decrypt(firstLeadsEncrypted);
-            bool secondLeads = FHE.decrypt(secondLeadsEncrypted);
+    }
 
-            if (firstLeads) {
-                game.winner = playerAAddress;
-                game.isTie = false;
-            } else if (secondLeads) {
-                game.winner = playerBAddress;
-                game.isTie = false;
-            } else {
-                game.winner = address(0);
-                game.isTie = true;
-            }
+    /// @notice Allows both players to make their encrypted balances and scores publicly decryptable for finalization.
+    /// @param gameId Identifier of the game to prepare.
+    function prepareDecryption(uint256 gameId) external {
+        Game storage game = _getGame(gameId);
+        require(game.status == GameStatus.InProgress, "Game is not active");
+        require(_isPlayer(game, msg.sender), "Caller is not a player");
 
-            game.status = GameStatus.Finished;
-            emit GameFinished(gameId, game.winner, game.isTie);
+        address playerAAddress = game.players[0];
+        address playerBAddress = game.players[1];
+        PlayerState storage playerA = _playerStates[gameId][playerAAddress];
+        PlayerState storage playerB = _playerStates[gameId][playerBAddress];
+
+        FHE.makePubliclyDecryptable(playerA.coins);
+        FHE.makePubliclyDecryptable(playerB.coins);
+        FHE.makePubliclyDecryptable(playerA.score);
+        FHE.makePubliclyDecryptable(playerB.score);
+    }
+
+    /// @notice Finalizes the game using a public decryption proof for coins and scores.
+    /// @param gameId Identifier of the game.
+    /// @param abiEncodedClearValues ABI-encoded (playerA coins, playerB coins, playerA score, playerB score) returned by the relayer.
+    /// @param decryptionProof Decryption proof from the relayer for the provided handles and clear values.
+    function finalizeWithProof(uint256 gameId, bytes calldata abiEncodedClearValues, bytes calldata decryptionProof) external {
+        Game storage game = _getGame(gameId);
+        require(game.status == GameStatus.InProgress, "Game is not active");
+
+        address playerAAddress = game.players[0];
+        address playerBAddress = game.players[1];
+        PlayerState storage playerA = _playerStates[gameId][playerAAddress];
+        PlayerState storage playerB = _playerStates[gameId][playerBAddress];
+
+        require(!playerA.hasSubmitted && !playerB.hasSubmitted, "Round still in progress");
+
+        bytes32[] memory handles = new bytes32[](4);
+        handles[0] = FHE.toBytes32(playerA.coins);
+        handles[1] = FHE.toBytes32(playerB.coins);
+        handles[2] = FHE.toBytes32(playerA.score);
+        handles[3] = FHE.toBytes32(playerB.score);
+
+        FHE.checkSignatures(handles, abiEncodedClearValues, decryptionProof);
+
+        (uint32 coinsA, uint32 coinsB, uint32 scoreA, uint32 scoreB) = abi.decode(
+            abiEncodedClearValues,
+            (uint32, uint32, uint32, uint32)
+        );
+
+        require(coinsA == 0 && coinsB == 0, "Coins remain");
+
+        if (scoreA > scoreB) {
+            game.winner = playerAAddress;
+            game.isTie = false;
+        } else if (scoreB > scoreA) {
+            game.winner = playerBAddress;
+            game.isTie = false;
+        } else {
+            game.winner = address(0);
+            game.isTie = true;
         }
+
+        game.status = GameStatus.Finished;
+        emit GameFinished(gameId, game.winner, game.isTie);
     }
 }
