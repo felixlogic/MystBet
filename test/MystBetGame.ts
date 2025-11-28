@@ -3,6 +3,7 @@ import { ethers, fhevm } from "hardhat";
 import { MystBetGame, MystBetGame__factory } from "../types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { FhevmType } from "@fhevm/hardhat-plugin";
+import hre from "hardhat";
 
 type Signers = {
   creator: HardhatEthersSigner;
@@ -39,7 +40,7 @@ describe("MystBetGame", function () {
   }
 
   async function startDefaultGame() {
-    const predictedId = await mystBetGame.connect(signers.creator).callStatic.createGame();
+    const predictedId = await mystBetGame.connect(signers.creator).createGame.staticCall();
     await mystBetGame.connect(signers.creator).createGame();
     await mystBetGame.connect(signers.challenger).joinGame(predictedId);
     await mystBetGame.connect(signers.creator).startGame(predictedId);
@@ -47,7 +48,7 @@ describe("MystBetGame", function () {
   }
 
   it("allows players to create and join games", async function () {
-    const predictedId = await mystBetGame.connect(signers.creator).callStatic.createGame();
+    const predictedId = await mystBetGame.connect(signers.creator).createGame.staticCall();
     await mystBetGame.connect(signers.creator).createGame();
 
     const createdGame = await mystBetGame.getGame(predictedId);
@@ -116,11 +117,26 @@ describe("MystBetGame", function () {
   it("prevents spending more coins than available", async function () {
     const gameId = await startDefaultGame();
     const invalidMove = await encryptMove(11, signers.creator);
-    await expect(
-      mystBetGame
-        .connect(signers.creator)
-        .submitEncryptedMove(gameId, invalidMove.handles[0], invalidMove.inputProof),
-    ).to.be.revertedWith("Insufficient coins");
+
+    await mystBetGame
+      .connect(signers.creator)
+      .submitEncryptedMove(gameId, invalidMove.handles[0], invalidMove.inputProof);
+
+    // challenger submits to resolve the round
+    const challengerMove = await encryptMove(0, signers.challenger);
+    await mystBetGame
+      .connect(signers.challenger)
+      .submitEncryptedMove(gameId, challengerMove.handles[0], challengerMove.inputProof);
+
+    const creatorState = await mystBetGame.getPlayerState(gameId, signers.creator.address);
+    const creatorCoins = await fhevm.userDecryptEuint(
+      FhevmType.euint32,
+      creatorState.coins,
+      mystBetGameAddress,
+      signers.creator,
+    );
+
+    expect(creatorCoins).to.eq(0);
   });
 
   it("finishes once both players have spent every coin", async function () {
@@ -144,6 +160,26 @@ describe("MystBetGame", function () {
         .connect(signers.challenger)
         .submitEncryptedMove(gameId, challengerMove.handles[0], challengerMove.inputProof);
     }
+
+    await mystBetGame.prepareDecryption(gameId);
+
+    const playerAState = await mystBetGame.getPlayerState(gameId, signers.creator.address);
+    const playerBState = await mystBetGame.getPlayerState(gameId, signers.challenger.address);
+
+    const handles = [
+      playerAState.coins,
+      playerBState.coins,
+      playerAState.score,
+      playerBState.score,
+    ];
+
+    const publicDecryption = await hre.fhevm.publicDecrypt(handles);
+
+    await mystBetGame.finalizeWithProof(
+      gameId,
+      publicDecryption.abiEncodedClearValues,
+      publicDecryption.decryptionProof,
+    );
 
     const finalGame = await mystBetGame.getGame(gameId);
     expect(finalGame.status).to.eq(3);
