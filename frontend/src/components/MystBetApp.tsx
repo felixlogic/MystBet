@@ -73,16 +73,36 @@ export function MystBetApp() {
     if (!gamesRaw) {
       return [];
     }
-    return (gamesRaw as RawGame[]).map(game => ({
-      id: game[0],
-      creator: game[1],
-      players: game[2],
-      playerCount: Number(game[3]),
-      status: Number(game[4]),
-      currentRound: Number(game[5]),
-      winner: game[6],
-      isTie: Boolean(game[7]),
-    }));
+
+    const normalize = (raw: any): GameInfo | null => {
+      const id = raw?.id ?? raw?.[0];
+      const creator = raw?.creator ?? raw?.[1] ?? ZERO_ADDRESS;
+      const players = (raw?.players ?? raw?.[2]) as readonly [string, string] | undefined;
+      const playerCount = raw?.playerCount ?? raw?.[3];
+      const status = raw?.status ?? raw?.[4];
+      const currentRound = raw?.currentRound ?? raw?.[5];
+      const winner = raw?.winner ?? raw?.[6] ?? ZERO_ADDRESS;
+      const isTie = raw?.isTie ?? raw?.[7] ?? false;
+
+      if (id === undefined || !players) {
+        return null;
+      }
+
+      return {
+        id: BigInt(id),
+        creator,
+        players,
+        playerCount: Number(playerCount ?? 0),
+        status: Number(status ?? 0),
+        currentRound: Number(currentRound ?? 0),
+        winner,
+        isTie: Boolean(isTie),
+      };
+    };
+
+    return (gamesRaw as any[])
+      .map(normalize)
+      .filter((game): game is GameInfo => Boolean(game));
   }, [gamesRaw]);
 
   useEffect(() => {
